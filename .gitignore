@@ -18,6 +18,9 @@ data/sessions/*.json
 docs/PR-*.md
 docs/pr_*.md
 
+# Local Devpost submission assets (kept local for drag-and-drop upload)
+submission-assets/
+
 # TypeScript / Next generated artifacts
 *.tsbuildinfo
 next-env.d.ts
