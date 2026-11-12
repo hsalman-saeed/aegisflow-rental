@@ -1,0 +1,808 @@
+openapi: 3.1.0
+info:
+  title: AegisFlow Rental — Deposit-to-Dispute Operational API
+  version: 1.0.0
+  summary: 16 Next.js Route Handlers powering PayPal Braintree holds, Amazon Nova multimodal inspection, Channel3 live retail price proof, $100 policy-gated partial settlement, 48h maintenance rescheduling, chargeback defense, and AG Studio 3.1 BI streaming.
+  description: |
+    Authoritative OpenAPI 3.1.0 specification for AegisFlow Rental.
+    All monetary quantities across schemas and payloads are represented in integer USD cents (`*Cents`) to eliminate floating-point drift.
+    Authentication relies strictly on the HTTP-only `aegisflow_sid` cookie issued automatically by `/api/session`. No third-party credentials or API keys are exposed in client payloads or this specification.
+  license:
+    name: MIT License (OSI-Approved Open Source License)
+    url: https://opensource.org/license/mit
+servers:
+  - url: http://localhost:3000
+    description: Local Next.js 14 Development Server
+  - url: https://aegisflow-rental.vercel.app
+    description: Hosted Demonstration Deployment
+tags:
+  - name: Session
+    description: Per-visitor isolated session store & demo reset
+  - name: Bookings & Dispatch
+    description: Rental booking lookup, creation, and dispatch gating
+  - name: Braintree Escrow & Settlement
+    description: PayPal/Venmo sandbox deposit holds, $100 policy-gated child captures, and vault fallback
+  - name: Multimodal Inspection & Channel3
+    description: Amazon Nova return damage detection, yard sign-off, and live Channel3 retail price proof
+  - name: Fleet Scheduler
+    description: 48-hour maintenance quarantine and downstream backup asset reassignment
+  - name: Chargeback Defense
+    description: Braintree dispute simulation, grounded Nova representment drafting, and sandbox sentinel submission
+  - name: Studio AI
+    description: Streaming Amazon Nova Studio BI & read-only dispute readiness assistant
+
+security:
+  - SessionCookieAuth: []
+
+paths:
+  /api/session:
+    get:
+      tags: [Session]
+      operationId: getSession
+      summary: Resolve or initialize the isolated visitor session
+      description: Reads the `af_session_id` cookie (creating a seeded session if absent or expired) and returns all 6 relational tables (`customers`, `assets`, `bookings`, `transactions`, `inspections`, `disputes`) plus `maintenanceBlocks` and `eventLog`.
+      responses:
+        "200":
+          description: Active or newly initialized session snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/session/reset:
+    post:
+      tags: [Session]
+      operationId: resetSession
+      summary: Reset the active visitor session back to canonical seed state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  const: true
+                  description: Explicit confirmation flag required to reset session data.
+      responses:
+        "200":
+          description: Reset session payload returned cleanly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/bookings:
+    get:
+      tags: [Bookings & Dispatch]
+      operationId: listBookings
+      summary: List bookings and fleet assets for the current session
+      responses:
+        "200":
+          description: Bookings and asset catalog for the session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+    post:
+      tags: [Bookings & Dispatch]
+      operationId: createBooking
+      summary: Create a tentative rental booking for a studio customer and fleet asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assetId, customerId, startDate, endDate]
+              properties:
+                assetId:
+                  type: string
+                  example: AST-001
+                customerId:
+                  type: string
+                  example: CUST-001
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+                rentalFeeCents:
+                  type: integer
+                  description: Rental fee in integer USD cents.
+                  example: 95000
+                depositHoldCents:
+                  type: integer
+                  description: Required security deposit hold in integer USD cents.
+                  example: 150000
+      responses:
+        "200":
+          description: Booking created in tentative state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/bookings/dispatch:
+    post:
+      tags: [Bookings & Dispatch]
+      operationId: dispatchBooking
+      summary: Dispatch a confirmed booking after deposit hold gate validation
+      description: Hard-blocks dispatch with HTTP 409 whenever `authStatus !== "authorized"`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId]
+              properties:
+                bookingId:
+                  type: string
+                  example: BK-9021
+      responses:
+        "200":
+          description: Equipment dispatched to customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/braintree/hold:
+    post:
+      tags: [Braintree Escrow & Settlement]
+      operationId: authorizeDepositHold
+      summary: Authorize (or fail with processor decline on $2,000 test) a PayPal/Venmo sandbox deposit hold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId, paymentRail]
+              properties:
+                bookingId:
+                  type: string
+                  example: BK-9021
+                paymentRail:
+                  type: string
+                  enum: [PayPal, Venmo]
+                  default: PayPal
+                amountCents:
+                  type: integer
+                  description: Optional override in integer cents (e.g. 200000 to exercise processor decline on Booking #2).
+                  example: 150000
+      responses:
+        "200":
+          description: Authorization succeeded in Braintree Sandbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/inspection/analyze:
+    post:
+      tags: [Multimodal Inspection & Channel3]
+      operationId: analyzeReturnInspection
+      summary: Analyze uploaded equipment return photos via Amazon Bedrock Nova multimodal vision
+      description: Accepts up to 4 images (`image/jpeg`, `image/png`, `image/webp`, <= 5 MB each) and returns structured discrepancy items plus honest `aiSource` and `aiAvailable` flags.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [bookingId]
+              properties:
+                bookingId:
+                  type: string
+                  example: BK-9021
+                notes:
+                  type: string
+                images:
+                  type: array
+                  maxItems: 4
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "200":
+          description: Structured discrepancy detections with `aiSource` and `aiAvailable` honesty metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/inspection/confirm:
+    post:
+      tags: [Multimodal Inspection & Channel3]
+      operationId: confirmReturnInspection
+      summary: Record mandatory Yard Manager verification sign-off on discrepancy items
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId]
+              properties:
+                bookingId:
+                  type: string
+                  example: BK-9021
+                inspectorSigned:
+                  type: boolean
+                  const: true
+                verifiedItemIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Yard inspection signed off cleanly with server UTC timestamp
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/channel3/price-check:
+    post:
+      tags: [Multimodal Inspection & Channel3]
+      operationId: channel3PriceCheck
+      summary: Search live Channel3 retail product catalog for replacement pricing proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  example: SanDisk 128GB Extreme PRO SDXC Card
+                itemId:
+                  type: string
+      responses:
+        "200":
+          description: Live priced retail product matches returned from Channel3
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productId: { type: string }
+                        title: { type: string }
+                        merchantDomain: { type: string }
+                        priceCents: { type: integer }
+                        retailUrl: { type: string, format: uri }
+                        retrievedAt: { type: string, format: date-time }
+                  fallbackAllowed: { type: boolean }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/channel3/lock-price:
+    post:
+      tags: [Multimodal Inspection & Channel3]
+      operationId: lockChannel3Price
+      summary: Lock a verified Channel3 SKU price and retail proof URL onto a discrepancy item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId, itemId, title, priceCents, retailUrl]
+              properties:
+                bookingId: { type: string, example: BK-9021 }
+                itemId: { type: string }
+                title: { type: string }
+                priceCents:
+                  type: integer
+                  description: Verified retail unit price in integer cents.
+                retailUrl: { type: string, format: uri }
+                priceSource:
+                  type: string
+                  enum: [channel3, manual_source]
+                  default: channel3
+      responses:
+        "200":
+          description: Discrepancy item updated with locked Channel3 price and provenance URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/braintree/settle-partial:
+    post:
+      tags: [Braintree Escrow & Settlement]
+      operationId: settlePartialCapture
+      summary: Execute policy-gated ($100 threshold) partial settlement against the parent hold
+      description: Auto-captures locked amounts <= 10000 cents; enforces HTTP 403 unless `humanApproved === true` (or explicit `rejectionReason`) for amounts > 10000 cents. Uses integer-cent locked Channel3 prices strictly from server session state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId]
+              properties:
+                itemId: { type: string }
+                bookingId: { type: string, example: BK-9021 }
+                humanApproved: { type: boolean, default: false }
+                rejectionReason: { type: string }
+      responses:
+        "200":
+          description: Child settlement executed (`partial_settlement` or `fallback_vault_capture`) or deduction rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Policy gate blocked auto-settlement above $100.00 without Finance Approver sign-off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/scheduler/maintenance-and-conflict:
+    post:
+      tags: [Fleet Scheduler]
+      operationId: insertMaintenanceAndScanConflicts
+      summary: Insert a 48h maintenance quarantine block and identify colliding future bookings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assetId]
+              properties:
+                assetId: { type: string, example: AST-001 }
+                bookingId: { type: string, example: BK-9021 }
+                repairReason: { type: string }
+                signOffIso: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Maintenance block saved and eligible backup unit recommendations computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/scheduler/reassign:
+    post:
+      tags: [Fleet Scheduler]
+      operationId: reassignConflictingBooking
+      summary: Reassign an overlapping booking to an eligible backup unit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId, targetAssetId]
+              properties:
+                bookingId: { type: string, example: BK-9024 }
+                targetAssetId: { type: string, example: AST-002 }
+      responses:
+        "200":
+          description: Booking moved to backup unit with status `reassigned`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/braintree/dispute/simulate:
+    post:
+      tags: [Chargeback Defense]
+      operationId: simulateSandboxDispute
+      summary: Create an Open Braintree Sandbox chargeback dispute on a settled transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookingId: { type: string, example: BK-9021 }
+                childTxnId: { type: string }
+      responses:
+        "200":
+          description: Open sandbox dispute created via `venmo_6201` or `test_card_instant` trigger method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/braintree/dispute/draft-evidence:
+    post:
+      tags: [Chargeback Defense]
+      operationId: draftDisputeEvidence
+      summary: Draft a grounded 4-section representment narrative verified against database & Channel3 facts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [disputeId]
+              properties:
+                disputeId: { type: string }
+      responses:
+        "200":
+          description: Grounded representment narrative and deterministic facts returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/braintree/dispute/submit:
+    post:
+      tags: [Chargeback Defense]
+      operationId: submitDisputeRepresentment
+      summary: Validate representment facts, attach sandbox evidence sentinel, and finalize Braintree dispute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [disputeId, approvedText]
+              properties:
+                disputeId: { type: string }
+                approvedText: { type: string }
+      responses:
+        "200":
+          description: Dispute representment finalized (`Won` in Braintree Sandbox with sentinel verification)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/ai/nova-stream:
+    post:
+      tags: [Studio AI]
+      operationId: streamStudioNovaAssistant
+      summary: Stream AG Studio 3.1 financial & dispute readiness insights from Amazon Bedrock Nova
+      description: Returns Server-Sent Events (`tool_result`, `meta`, `text_delta`, `done`, `error`). Enforces sliding-window rate limits via HTTP 429.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
+                history:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, text]
+                    properties:
+                      role: { type: string, enum: [user, assistant] }
+                      text: { type: string }
+      responses:
+        "200":
+          description: Text/event-stream SSE response stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+components:
+  securitySchemes:
+    SessionCookieAuth:
+      type: apiKey
+      in: cookie
+      name: af_session_id
+      description: HTTP-only session cookie mapping to Redis/file-backed SessionData.
+
+  responses:
+    BadRequest:
+      description: Validation or precondition failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Requested record was not found in the active session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Domain gate or schedule conflict (e.g. dispatch blocked without authorized hold)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: Per-session sliding-window rate limit exceeded (HTTP 429)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    GatewayTimeout:
+      description: Upstream Braintree, Channel3, or AWS Bedrock call timed out or failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        mismatches:
+          type: array
+          items: { type: string }
+        decision:
+          type: object
+          additionalProperties: true
+
+    Customer:
+      type: object
+      required: [id, name, company, email, paypalVaultStatus, riskTier]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        company: { type: string }
+        email: { type: string, format: email }
+        paypalVaultStatus: { type: string, enum: [vaulted, none] }
+        riskTier: { type: string, enum: [A, B, C] }
+
+    Asset:
+      type: object
+      required: [id, name, category, serialNumber, dailyRateCents, replacementValueCents, status, model]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { type: string, enum: ["Cinema Cameras", "Lighting", "Audio"] }
+        serialNumber: { type: string }
+        dailyRateCents: { type: integer, description: "Daily rental rate in integer USD cents." }
+        replacementValueCents: { type: integer, description: "Asset replacement value in integer USD cents." }
+        status: { type: string, enum: [available, rented, maintenance] }
+        model: { type: string }
+
+    Booking:
+      type: object
+      required: [id, assetId, customerId, startDate, endDate, rentalFeeCents, depositHoldCents, authStatus, scheduleStatus]
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        customerId: { type: string }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        rentalFeeCents: { type: integer, description: "Booking fee in integer USD cents." }
+        depositHoldCents: { type: integer, description: "Security deposit hold in integer USD cents." }
+        authStatus: { type: string, enum: [pending, authorized, declined, error] }
+        parentTransactionId: { type: string }
+        scheduleStatus: { type: string, enum: [tentative, confirmed, dispatched, returned, reassigned, at_risk, closed] }
+
+    Transaction:
+      type: object
+      required: [id, braintreeId, bookingId, customerId, type, paymentMethod, amountCents, signedAmountCents, status, createdAt]
+      properties:
+        id: { type: string }
+        braintreeId: { type: string }
+        parentTransactionId: { type: string }
+        bookingId: { type: string }
+        customerId: { type: string }
+        type: { type: string, enum: [auth_hold, partial_settlement, refund, dispute_test] }
+        captureMode: { type: string, enum: [partial_settlement, fallback_vault_capture] }
+        paymentMethod: { type: string, enum: [PayPal, Venmo, Visa] }
+        amountCents: { type: integer, description: "Transaction amount in integer USD cents." }
+        signedAmountCents: { type: integer, description: "Signed ledger impact in integer USD cents." }
+        status: { type: string, enum: [authorized, settled, processor_declined, voided] }
+        createdAt: { type: string, format: date-time }
+
+    InspectionItem:
+      type: object
+      required: [id, itemName, type, evidenceNotes, needsMaintenance, inspectorVerified, priceSource]
+      properties:
+        id: { type: string }
+        itemName: { type: string }
+        type: { type: string, enum: [missing, damaged, ok] }
+        evidenceNotes: { type: string }
+        needsMaintenance: { type: boolean }
+        inspectorVerified: { type: boolean }
+        channel3ProductTitle: { type: string }
+        channel3PriceCents: { type: integer, description: "Locked Channel3 retail price in integer USD cents." }
+        channel3RetailUrl: { type: string, format: uri }
+        channel3RetrievedAt: { type: string, format: date-time }
+        priceSource: { type: string, enum: [channel3, manual_source] }
+        capturedAmountCents: { type: integer, description: "Captured settlement amount in integer USD cents." }
+        childTransactionId: { type: string }
+        approvalMode: { type: string, enum: [auto_under_cap, human_approved, rejected] }
+
+    Inspection:
+      type: object
+      required: [id, bookingId, assetId, inspectorVerified, items]
+      properties:
+        id: { type: string }
+        bookingId: { type: string }
+        assetId: { type: string }
+        inspectorVerified: { type: boolean }
+        signOffTimestamp: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/InspectionItem" }
+
+    Dispute:
+      type: object
+      required: [id, braintreeDisputeId, transactionId, bookingId, customerId, amountDisputedCents, reason, status, triggerMethod, evidencePacketSummary, channel3ProofUrl, replyByDate]
+      properties:
+        id: { type: string }
+        braintreeDisputeId: { type: string }
+        transactionId: { type: string }
+        bookingId: { type: string }
+        customerId: { type: string }
+        amountDisputedCents: { type: integer, description: "Disputed amount in integer USD cents." }
+        reason: { type: string }
+        status: { type: string, enum: [Open, Won, Lost] }
+        triggerMethod: { type: string, enum: [venmo_6201, test_card_instant] }
+        evidencePacketSummary: { type: string }
+        channel3ProofUrl: { type: string, format: uri }
+        replyByDate: { type: string }
+        submissionStep: { type: string, enum: [draft, evidence_added, finalized] }
+
+    MaintenanceBlock:
+      type: object
+      required: [id, assetId, reason, startDate, endDate, createdAt]
+      properties:
+        id: { type: string }
+        assetId: { type: string }
+        reason: { type: string }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    EventLogEntry:
+      type: object
+      required: [id, timestamp, actorRole, action, entityType, entityId, metadata]
+      properties:
+        id: { type: string }
+        timestamp: { type: string, format: date-time }
+        actorRole: { type: string, enum: ["Yard Manager", "Finance Approver", "System / AI"] }
+        action: { type: string }
+        entityType: { type: string, enum: [booking, transaction, inspection, dispute] }
+        entityId: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+
+    SessionData:
+      type: object
+      required: [sessionId, createdAt, updatedAt, customers, assets, bookings, transactions, inspections, disputes, maintenanceBlocks, eventLog]
+      properties:
+        sessionId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        customers:
+          type: array
+          items: { $ref: "#/components/schemas/Customer" }
+        assets:
+          type: array
+          items: { $ref: "#/components/schemas/Asset" }
+        bookings:
+          type: array
+          items: { $ref: "#/components/schemas/Booking" }
+        transactions:
+          type: array
+          items: { $ref: "#/components/schemas/Transaction" }
+        inspections:
+          type: array
+          items: { $ref: "#/components/schemas/Inspection" }
+        disputes:
+          type: array
+          items: { $ref: "#/components/schemas/Dispute" }
+        maintenanceBlocks:
+          type: array
+          items: { $ref: "#/components/schemas/MaintenanceBlock" }
+        eventLog:
+          type: array
+          items: { $ref: "#/components/schemas/EventLogEntry" }
+
+    SessionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        sessionId: { type: string }
+        data: { $ref: "#/components/schemas/SessionData" }
+

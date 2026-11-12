@@ -1,0 +1,241 @@
+{
+  "info": {
+    "name": "AegisFlow Rental — 6-Step Hero Loop & 16-Endpoint API Suite",
+    "_postman_id": "7f6b4b3d-9021-4c8d-9c52-aegisflow001",
+    "description": "Ordered Postman Collection v2.1.0 covering all 16 /api/* endpoints and the end-to-end Deposit-to-Dispute operational workflow. Zero live secrets included; uses cookie-based session persistence.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "bookingIdPrimary",
+      "value": "BK-9021",
+      "type": "string"
+    },
+    {
+      "key": "bookingIdDecline",
+      "value": "BK-9022",
+      "type": "string"
+    },
+    {
+      "key": "bookingIdConflict",
+      "value": "BK-9024",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Step 0A: Get Session",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/session"
+      }
+    },
+    {
+      "name": "Step 0B: Reset Session",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"confirm\": true\n}" },
+        "url": "{{baseUrl}}/api/session/reset"
+      }
+    },
+    {
+      "name": "Step 0C: List Bookings",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/bookings"
+      }
+    },
+    {
+      "name": "Step 1A: Authorize $1,500 PayPal Hold (BK-9021)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"paymentRail\": \"PayPal\",\n  \"amountCents\": 150000\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/hold"
+      }
+    },
+    {
+      "name": "Step 1B: Attempt $2,000 Declined Hold (BK-9022)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdDecline}}\",\n  \"paymentRail\": \"PayPal\",\n  \"amountCents\": 200000\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/hold"
+      }
+    },
+    {
+      "name": "Step 1C: Dispatch Kit (BK-9021)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\"\n}"
+        },
+        "url": "{{baseUrl}}/api/bookings/dispatch"
+      }
+    },
+    {
+      "name": "Step 2A: Analyze Return with Amazon Nova",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "bookingId", "value": "{{bookingIdPrimary}}", "type": "text" },
+            { "key": "notes", "value": "Missing SanDisk 128GB SDXC card and damaged Rode NTG5 shotgun mount.", "type": "text" }
+          ]
+        },
+        "url": "{{baseUrl}}/api/inspection/analyze"
+      }
+    },
+    {
+      "name": "Step 2B: Inspector Sign-Off",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"inspectorSigned\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/inspection/confirm"
+      }
+    },
+    {
+      "name": "Step 3A: Channel3 Price Check",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"SanDisk 128GB Extreme PRO SDXC Card\"\n}"
+        },
+        "url": "{{baseUrl}}/api/channel3/price-check"
+      }
+    },
+    {
+      "name": "Step 3B: Lock Price Proof",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"itemId\": \"ITEM-01\",\n  \"title\": \"SanDisk 128GB Extreme Pro SDXC UHS-I Card\",\n  \"priceCents\": 5380,\n  \"retailUrl\": \"https://www.newegg.com/sandisk-128gb-sdxc\",\n  \"priceSource\": \"channel3\"\n}"
+        },
+        "url": "{{baseUrl}}/api/channel3/lock-price"
+      }
+    },
+    {
+      "name": "Step 4A: Auto-Capture <= $100",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"itemId\": \"ITEM-01\",\n  \"humanApproved\": false\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/settle-partial"
+      }
+    },
+    {
+      "name": "Step 4B: Approve > $100 Capture",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"itemId\": \"ITEM-02\",\n  \"humanApproved\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/settle-partial"
+      }
+    },
+    {
+      "name": "Step 5A: Insert 48h Maintenance & Detect Conflict",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assetId\": \"AST-001\",\n  \"bookingId\": \"{{bookingIdPrimary}}\",\n  \"repairReason\": \"48h Acoustic & Audio Port Inspection\"\n}"
+        },
+        "url": "{{baseUrl}}/api/scheduler/maintenance-and-conflict"
+      }
+    },
+    {
+      "name": "Step 5B: Reassign to Backup Unit #2",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdConflict}}\",\n  \"targetAssetId\": \"AST-002\"\n}"
+        },
+        "url": "{{baseUrl}}/api/scheduler/reassign"
+      }
+    },
+    {
+      "name": "Step 6A: Simulate Dispute",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"bookingId\": \"{{bookingIdPrimary}}\"\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/dispute/simulate"
+      }
+    },
+    {
+      "name": "Step 6B: Draft Grounded Evidence",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"disputeId\": \"DSP-001\"\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/dispute/draft-evidence"
+      }
+    },
+    {
+      "name": "Step 6C: Submit Evidence & Sentinel",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"disputeId\": \"DSP-001\",\n  \"approvedText\": \"Grounded representment brief referencing Booking BK-9021, verified Channel3 proof URL, and settled child transaction.\"\n}"
+        },
+        "url": "{{baseUrl}}/api/braintree/dispute/submit"
+      }
+    },
+    {
+      "name": "Step 6D: Stream Studio AI Assistant",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Run check_dispute_evidence_readiness on Booking BK-9021 and explain our Deposit Recovery Rate (% of Priced).\"\n}"
+        },
+        "url": "{{baseUrl}}/api/ai/nova-stream"
+      }
+    }
+  ]
+}
+
