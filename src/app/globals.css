@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --af-bg-base: #090d16;
+  --af-surface-card: #111827;
+  --af-surface-hover: #1f2937;
+  --af-border-subtle: #374151;
+  --af-border-strong: #4b5563;
+
+  --af-blue-primary: #2563eb;
+  --af-blue-glow: #3b82f6;
+  --af-blue-subtle: #1e3a8a;
+
+  --af-state-confirmed: #10b981;
+  --af-state-confirmed-bg: #064e3b;
+  --af-state-pending: #f59e0b;
+  --af-state-pending-bg: #78350f;
+  --af-state-danger: #ef4444;
+  --af-state-danger-bg: #7f1d1d;
+  --af-state-maint: #f43f5e;
+  --af-state-maint-stripes: #881337;
+  --af-state-ai-accent: #8b5cf6;
+  --af-state-ai-bg: #4c1d95;
+}
+
+body {
+  background-color: var(--af-bg-base);
+  color: #f3f6fc;
+}
+
+/* Bryntum Dark Cinema Theme Overrides & Non-Color-Only Event States (NFR-009) */
+.af-bryntum-host .b-scheduler,
+.af-bryntum-host .b-grid-panel-body {
+  background-color: var(--af-surface-card);
+  color: #f3f6fc;
+  border-color: var(--af-border-subtle);
+}
+
+.af-bryntum-host .b-grid-header-container,
+.af-bryntum-host .b-sch-header-timeaxis-cell {
+  background-color: #0d1320;
+  color: #cbd5e1;
+  border-color: var(--af-border-subtle);
+}
+
+.af-bryntum-host .b-grid-row:nth-child(even) {
+  background-color: rgba(17, 24, 39, 0.85);
+}
+
+.af-bryntum-host .b-sch-event {
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.af-bryntum-host .b-sch-event.af-ev-confirmed {
+  background-color: var(--af-state-confirmed-bg);
+  border-color: var(--af-state-confirmed);
+  color: #ecfdf5;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-tentative {
+  background-color: var(--af-blue-subtle);
+  border-color: var(--af-blue-glow);
+  border-style: dashed;
+  color: #eff6ff;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-hold-failed {
+  background-color: var(--af-state-pending-bg);
+  border-color: var(--af-state-pending);
+  color: #fffbeb;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-dispatched {
+  background-color: #0e7490;
+  border-color: #22d3ee;
+  color: #ecfeff;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-returned {
+  background-color: var(--af-state-ai-bg);
+  border-color: var(--af-state-ai-accent);
+  color: #f5f3ff;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-maintenance {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--af-state-maint-stripes),
+    var(--af-state-maint-stripes) 8px,
+    #4c0519 8px,
+    #4c0519 16px
+  );
+  border-color: var(--af-state-maint);
+  color: #fff1f2;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-reassigned {
+  background-color: #065f46;
+  border-color: #38bdf8;
+  color: #f0fdf4;
+}
+
+.af-bryntum-host .b-sch-event.af-ev-at-risk {
+  background-color: var(--af-state-danger-bg);
+  border-color: var(--af-state-danger);
+  color: #fef2f2;
+}
