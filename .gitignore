@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Next.js build outputs
+.next/
+out/
+
+# Environment & local secrets
+.env
+.env.local
+.env.*.local
+
+# Ephemeral local session persistence
+data/sessions/*.json
+.aegisflow-sessions/
+
+# Private internal architecture & audit markdown docs (kept local only)
+docs/PR-*.md
+docs/pr_*.md
+
+# TypeScript / Next generated artifacts
+*.tsbuildinfo
+next-env.d.ts
+
+# Test & debug artifacts
+coverage/
+npm-debug.log*
+
